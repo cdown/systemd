@@ -1788,6 +1788,18 @@ static bool unit_has_mask_realized(
                 u->cgroup_invalidated_mask == 0;
 }
 
+static bool unit_has_mask_disables_realized(
+                Unit *u,
+                CGroupMask target_mask,
+                CGroupMask enable_mask) {
+
+        assert(u);
+
+        return u->cgroup_realized &&
+                (u->cgroup_realized_mask & target_mask) == u->cgroup_realized_mask &&
+                (u->cgroup_enabled_mask & enable_mask) == u->cgroup_enabled_mask;
+}
+
 static bool unit_has_mask_enables_realized(
                 Unit *u,
                 CGroupMask target_mask,
@@ -1858,6 +1870,61 @@ static int unit_realize_cgroup_now_enable(Unit *u, ManagerState state) {
         return 0;
 }
 
+/* Controllers can only be disabled depth-first, from the leaves of the
+ * hierarchy upwards to the unit in question. */
+static int unit_realize_cgroup_now_disable_depth_first(Unit *u, ManagerState state) {
+        Iterator i;
+        Unit *m;
+        void *v;
+
+        assert(u);
+
+        if (u->type != UNIT_SLICE)
+                return 0;
+
+        HASHMAP_FOREACH_KEY(v, m, u->dependencies[UNIT_BEFORE], i) {
+                CGroupMask target_mask, enable_mask;
+
+                if (m == u)
+                        continue;
+
+                if (UNIT_DEREF(m->slice) != u)
+                        continue;
+
+                /* The cgroup for this unit might not actually be fully
+                 * realised yet, in which case it isn't holding any controllers
+                 * open anyway. */
+                if (!m->cgroup_path)
+                        continue;
+
+                /* We must disable those below us first in order to release the
+                 * controller. */
+                if (m->type == UNIT_SLICE)
+                        unit_realize_cgroup_now_disable_depth_first(m, state);
+
+                target_mask = unit_get_target_mask(m);
+                enable_mask = unit_get_enable_mask(m);
+
+                /* We can only disable in this direction, don't try to enable
+                 * anything. */
+                if (!unit_has_mask_disables_realized(m, target_mask, enable_mask)) {
+                        CGroupMask new_target_mask, new_enable_mask;
+                        int r;
+
+                        new_target_mask = m->cgroup_realized_mask & target_mask;
+                        new_enable_mask = m->cgroup_enabled_mask & enable_mask;
+
+                        r = unit_create_cgroup(m, new_target_mask, new_enable_mask);
+                        if (r < 0)
+                                return r;
+
+                        cgroup_context_apply(m, new_target_mask, state);
+                        cgroup_xattr_apply(m);
+                }
+        }
+
+        return 0;
+}
 
 /* Check if necessary controllers and attributes for a unit are in place.
  *
@@ -1917,14 +1984,19 @@ static int unit_realize_cgroup_now(Unit *u, ManagerState state) {
         if (unit_has_mask_realized(u, target_mask, enable_mask))
                 return 0;
 
-        /* Enable controllers above us */
+        /* Disable controllers below us, if there are any */
+        r = unit_realize_cgroup_now_disable_depth_first(u, state);
+        if (r < 0)
+                return r;
+
+        /* Enable controllers above us, if there are any */
         if (UNIT_ISSET(u->slice)) {
                 r = unit_realize_cgroup_now_enable(UNIT_DEREF(u->slice), state);
                 if (r < 0)
                         return r;
         }
 
-        /* And then do the real work */
+        /* Now actually deal with the cgroup we were trying to realise */
         r = unit_create_cgroup(u, target_mask, enable_mask);
         if (r < 0)
                 return r;
