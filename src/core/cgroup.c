@@ -1225,7 +1225,7 @@ CGroupMask unit_get_own_mask(Unit *u) {
         if (!c)
                 return 0;
 
-        return cgroup_context_get_mask(c) | unit_get_bpf_mask(u) | unit_get_delegate_mask(u);
+        return (cgroup_context_get_mask(c) | unit_get_bpf_mask(u) | unit_get_delegate_mask(u)) & ~unit_get_ancestor_disable_mask(u);
 }
 
 CGroupMask unit_get_delegate_mask(Unit *u) {
@@ -1340,6 +1340,7 @@ CGroupMask unit_get_target_mask(Unit *u) {
 
         mask = unit_get_own_mask(u) | unit_get_members_mask(u) | unit_get_siblings_mask(u);
         mask &= u->manager->cgroup_supported;
+        mask &= ~unit_get_ancestor_disable_mask(u);
 
         return mask;
 }
@@ -1354,6 +1355,7 @@ CGroupMask unit_get_enable_mask(Unit *u) {
 
         mask = unit_get_members_mask(u);
         mask &= u->manager->cgroup_supported;
+        mask &= ~unit_get_ancestor_disable_mask(u);
 
         return mask;
 }
@@ -1970,7 +1972,7 @@ static int unit_realize_cgroup_now_disable(Unit *u, ManagerState state) {
  *     h i   j k  l m   n o
  *
  * 1. We want to realise cgroup "d" now.
- * 2. cgroup "a" has DisableController=cpu in the associated unit.
+ * 2. cgroup "a" has DisableControllers=cpu in the associated unit.
  * 3. cgroup "k" just started requesting the memory controller.
  *
  * To make this work we must do the following in order:

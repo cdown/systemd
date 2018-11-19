@@ -303,6 +303,39 @@ static int property_get_ip_address_access(
         return sd_bus_message_close_container(reply);
 }
 
+static int property_get_disable_controller(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        CGroupContext *c = userdata;
+        CGroupController ctrl;
+        int r;
+
+        assert(bus);
+        assert(reply);
+        assert(c);
+
+        r = sd_bus_message_open_container(reply, 'a', "s");
+        if (r < 0)
+                return r;
+
+        for (ctrl = 0; ctrl < _CGROUP_CONTROLLER_MAX; ctrl++) {
+                if ((c->disable_controllers & CGROUP_CONTROLLER_TO_MASK(ctrl)) == 0)
+                        continue;
+
+                r = sd_bus_message_append(reply, "s", cgroup_controller_to_string(ctrl));
+                if (r < 0)
+                        return r;
+        }
+
+        return sd_bus_message_close_container(reply);
+}
+
 const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_VTABLE_START(0),
         SD_BUS_PROPERTY("Delegate", "b", bus_property_get_bool, offsetof(CGroupContext, delegate), 0),
@@ -342,6 +375,7 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_PROPERTY("IPAccounting", "b", bus_property_get_bool, offsetof(CGroupContext, ip_accounting), 0),
         SD_BUS_PROPERTY("IPAddressAllow", "a(iayu)", property_get_ip_address_access, offsetof(CGroupContext, ip_address_allow), 0),
         SD_BUS_PROPERTY("IPAddressDeny", "a(iayu)", property_get_ip_address_access, offsetof(CGroupContext, ip_address_deny), 0),
+        SD_BUS_PROPERTY("DisableControllers", "as", property_get_disable_controller, 0, 0),
         SD_BUS_VTABLE_END
 };
 
