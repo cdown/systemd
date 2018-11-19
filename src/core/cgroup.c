@@ -1295,6 +1295,31 @@ CGroupMask unit_get_siblings_mask(Unit *u) {
         return unit_get_subtree_mask(u); /* we are the top-level slice */
 }
 
+CGroupMask unit_get_disable_mask(Unit *u) {
+        CGroupContext *c;
+
+        c = unit_get_cgroup_context(u);
+        if (!c)
+                return 0;
+
+        return c->disable_controllers;
+}
+
+CGroupMask unit_get_ancestor_disable_mask(Unit *u) {
+        CGroupMask mask;
+
+        assert(u);
+        mask = unit_get_disable_mask(u);
+
+        /* Returns the mask of controllers which are marked as forcibly
+         * disabled in any ancestor unit or the unit in question. */
+
+        if (UNIT_ISSET(u->slice))
+                mask |= unit_get_ancestor_disable_mask(UNIT_DEREF(u->slice));
+
+        return mask;
+}
+
 CGroupMask unit_get_subtree_mask(Unit *u) {
 
         /* Returns the mask of this subtree, meaning of the group
@@ -1796,8 +1821,8 @@ static bool unit_has_mask_disables_realized(
         assert(u);
 
         return u->cgroup_realized &&
-                (u->cgroup_realized_mask & target_mask) == u->cgroup_realized_mask &&
-                (u->cgroup_enabled_mask & enable_mask) == u->cgroup_enabled_mask;
+                FLAGS_SET(u->cgroup_realized_mask, target_mask) &&
+                FLAGS_SET(u->cgroup_enabled_mask, enable_mask);
 }
 
 static bool unit_has_mask_enables_realized(
@@ -1872,7 +1897,7 @@ static int unit_realize_cgroup_now_enable(Unit *u, ManagerState state) {
 
 /* Controllers can only be disabled depth-first, from the leaves of the
  * hierarchy upwards to the unit in question. */
-static int unit_realize_cgroup_now_disable_depth_first(Unit *u, ManagerState state) {
+static int unit_realize_cgroup_now_disable(Unit *u, ManagerState state) {
         Iterator i;
         Unit *m;
         void *v;
@@ -1884,9 +1909,6 @@ static int unit_realize_cgroup_now_disable_depth_first(Unit *u, ManagerState sta
 
         HASHMAP_FOREACH_KEY(v, m, u->dependencies[UNIT_BEFORE], i) {
                 CGroupMask target_mask, enable_mask;
-
-                if (m == u)
-                        continue;
 
                 if (UNIT_DEREF(m->slice) != u)
                         continue;
@@ -1900,7 +1922,7 @@ static int unit_realize_cgroup_now_disable_depth_first(Unit *u, ManagerState sta
                 /* We must disable those below us first in order to release the
                  * controller. */
                 if (m->type == UNIT_SLICE)
-                        unit_realize_cgroup_now_disable_depth_first(m, state);
+                        unit_realize_cgroup_now_disable(m, state);
 
                 target_mask = unit_get_target_mask(m);
                 enable_mask = unit_get_enable_mask(m);
@@ -1985,7 +2007,7 @@ static int unit_realize_cgroup_now(Unit *u, ManagerState state) {
                 return 0;
 
         /* Disable controllers below us, if there are any */
-        r = unit_realize_cgroup_now_disable_depth_first(u, state);
+        r = unit_realize_cgroup_now_disable(u, state);
         if (r < 0)
                 return r;
 
