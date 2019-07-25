@@ -1734,8 +1734,8 @@ int unit_watch_cgroup_memory(Unit *u) {
         if (!c->memory_accounting)
                 return 0;
 
-        /* Don't watch inner nodes, as the kernel doesn't report oom_kill events recursively currently, and
-         * we also don't want to generate a log message for each parent cgroup of a process. */
+        /* Don't watch inner nodes. Starting from 5.2+, the kernel reports memory events recursively, and we
+         * don't want to generate a log message for or kill each parent cgroup of a process. */
         if (u->type == UNIT_SLICE)
                 return 0;
 
@@ -1753,18 +1753,28 @@ int unit_watch_cgroup_memory(Unit *u) {
         if (r < 0)
                 return log_oom();
 
-        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "memory.events", &events);
+        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "memory.events.local", &events);
         if (r < 0)
                 return log_oom();
 
         u->cgroup_memory_inotify_wd = inotify_add_watch(u->manager->cgroup_inotify_fd, events, IN_MODIFY);
         if (u->cgroup_memory_inotify_wd < 0) {
+                if (errno != ENOENT) /* ENOENT might be because we're in a kernel with only memory.events, but
+                                      * not memory.events.local, so fall back to that */
+                        return log_unit_error_errno(u, errno, "Failed to add memory inotify watch descriptor for control group %s: %m", u->cgroup_path);
 
-                if (errno == ENOENT) /* If the directory is already gone we don't need to track it, so this
-                                      * is not an error */
-                        return 0;
+                r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "memory.events", &events);
+                if (r < 0)
+                        return log_oom();
 
-                return log_unit_error_errno(u, errno, "Failed to add memory inotify watch descriptor for control group %s: %m", u->cgroup_path);
+                u->cgroup_memory_inotify_wd = inotify_add_watch(u->manager->cgroup_inotify_fd, events, IN_MODIFY);
+                if (u->cgroup_memory_inotify_wd < 0) {
+                        if (errno == ENOENT) /* If the directory is already gone we don't need to track it, so this
+                                              * is not an error */
+                                return 0;
+                        return log_unit_error_errno(u, errno, "Failed to add memory inotify watch descriptor for control group %s: %m", u->cgroup_path);
+                }
+
         }
 
         r = hashmap_put(u->manager->cgroup_memory_inotify_wd_unit, INT_TO_PTR(u->cgroup_memory_inotify_wd), u);
