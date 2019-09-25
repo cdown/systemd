@@ -413,6 +413,56 @@ int cgroup_add_device_allow(CGroupContext *c, const char *dev, const char *mode)
         return 0;
 }
 
+int unit_get_kernel_memory_low(Unit *u, uint64_t *out_kval) {
+        CGroupContext *c;
+        _cleanup_free_ char *raw_kval = NULL;
+        uint64_t kval, sval;
+        int r;
+
+        /* Get the *real* memory setting from the kernel, not just what we set.
+         * On cgroup v1 this is a noop and always returns 0.
+         *
+         * Returns:
+         *
+         * <0: On error.
+         *  0: If the kernel memory setting doesn't match our configuration.
+         * >0: If the kernel memory setting matches our configuration.
+         */
+
+        assert(u);
+
+        r = cg_all_unified();
+
+        if (r < 0)
+                return log_debug_errno(r, "Failed to determine cgroup hierarchy version: %m");
+
+        if (r == 0)
+                return 0;
+
+        if (!u->cgroup_path)
+                return -EINVAL;
+
+        c = unit_get_cgroup_context(u);
+        assert(c);
+
+        r = cg_get_attribute("memory", u->cgroup_path, "memory.low", &raw_kval);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to get value of %s from %s: %m", "memory.low", u->cgroup_path);
+
+        r = safe_atou64(raw_kval, &kval);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to parse cgroup memory value '%s', ignoring: %m", raw_kval);
+
+        /* Even if you write a particular number of bytes into a cgroup memory file, it always returns that
+         * number rounded up to the size of the pages required for that. As such, so long as it aligns
+         * properly, everything is cricket. */
+        sval = (uint64_t)PAGE_ALIGN(c->memory_low);
+
+        *out_kval = kval;
+
+        return kval == sval;
+}
+
 #define UNIT_DEFINE_ANCESTOR_MEMORY_LOOKUP(entry)                       \
         uint64_t unit_get_ancestor_##entry(Unit *u) {                   \
                 CGroupContext *c;                                       \

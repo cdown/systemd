@@ -177,6 +177,8 @@ void cgroup_context_free_blockio_device_bandwidth(CGroupContext *c, CGroupBlockI
 
 int cgroup_add_device_allow(CGroupContext *c, const char *dev, const char *mode);
 
+int unit_get_kernel_memory_low(Unit *u, uint64_t *out_kval);
+
 CGroupMask unit_get_own_mask(Unit *u);
 CGroupMask unit_get_delegate_mask(Unit *u);
 CGroupMask unit_get_members_mask(Unit *u);
