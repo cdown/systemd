@@ -207,7 +207,35 @@ void cgroup_context_done(CGroupContext *c) {
         cpu_set_reset(&c->cpuset_mems);
 }
 
-void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
+#define FORMAT_CGROUP_DIFF_MAX 128
+
+static char *format_cgroup_diff_memory_low(char *buf, size_t l, Unit *u) {
+        char *p = buf;
+        uint64_t kval;
+        int r;
+
+        assert(u);
+        assert(buf);
+        assert(l > 0);
+
+        r = unit_get_kernel_memory_low(u, &kval);
+
+        if (r > 0) {
+                /* It matches, so nothing to format for display. */
+                p[0] = 0;
+                return buf;
+        }
+
+        if (r < 0) {
+                snprintf(p, l, " (error getting kernel value: %s)", strerror_safe(r));
+                return buf;
+        }
+
+        snprintf(p, l, " (different value in kernel: %" PRIu64 ")", kval);
+        return buf;
+}
+
+void unit_cgroup_context_dump(Unit *u, FILE* f, const char *prefix) {
         _cleanup_free_ char *disable_controllers_str = NULL;
         _cleanup_free_ char *cpuset_cpus = NULL;
         _cleanup_free_ char *cpuset_mems = NULL;
@@ -217,13 +245,18 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
         CGroupBlockIODeviceBandwidth *b;
         CGroupBlockIODeviceWeight *w;
         CGroupDeviceAllow *a;
+        CGroupContext *c;
         IPAddressAccessItem *iaai;
         char **path;
-        char u[FORMAT_TIMESPAN_MAX];
+        char q[FORMAT_TIMESPAN_MAX];
         char v[FORMAT_TIMESPAN_MAX];
+        char z[FORMAT_CGROUP_DIFF_MAX];
 
-        assert(c);
+        assert(u);
         assert(f);
+
+        c = unit_get_cgroup_context(u);
+        assert(c);
 
         prefix = strempty(prefix);
 
@@ -254,7 +287,7 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                 "%sDefaultMemoryMin: %" PRIu64 "\n"
                 "%sDefaultMemoryLow: %" PRIu64 "\n"
                 "%sMemoryMin: %" PRIu64 "\n"
-                "%sMemoryLow: %" PRIu64 "\n"
+                "%sMemoryLow: %" PRIu64 "%s\n"
                 "%sMemoryHigh: %" PRIu64 "\n"
                 "%sMemoryMax: %" PRIu64 "\n"
                 "%sMemorySwapMax: %" PRIu64 "\n"
@@ -273,7 +306,7 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                 prefix, c->startup_cpu_weight,
                 prefix, c->cpu_shares,
                 prefix, c->startup_cpu_shares,
-                prefix, format_timespan(u, sizeof(u), c->cpu_quota_per_sec_usec, 1),
+                prefix, format_timespan(q, sizeof(q), c->cpu_quota_per_sec_usec, 1),
                 prefix, format_timespan(v, sizeof(v), c->cpu_quota_period_usec, 1),
                 prefix, cpuset_cpus,
                 prefix, cpuset_mems,
@@ -284,7 +317,7 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                 prefix, c->default_memory_min,
                 prefix, c->default_memory_low,
                 prefix, c->memory_min,
-                prefix, c->memory_low,
+                prefix, c->memory_low, format_cgroup_diff_memory_low(z, sizeof(z), u),
                 prefix, c->memory_high,
                 prefix, c->memory_max,
                 prefix, c->memory_swap_max,
@@ -323,7 +356,7 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                         "%sIODeviceLatencyTargetSec: %s %s\n",
                         prefix,
                         l->path,
-                        format_timespan(u, sizeof(u), l->target_usec, 1));
+                        format_timespan(q, sizeof(q), l->target_usec, 1));
 
         LIST_FOREACH(device_limits, il, c->io_device_limits) {
                 char buf[FORMAT_BYTES_MAX];
@@ -440,7 +473,10 @@ int unit_get_kernel_memory_low(Unit *u, uint64_t *out_kval) {
                 return 0;
 
         if (!u->cgroup_path)
-                return -EINVAL;
+                return 0;
+
+        if (unit_has_name(u, SPECIAL_ROOT_SLICE))
+                return 0;
 
         c = unit_get_cgroup_context(u);
         assert(c);
