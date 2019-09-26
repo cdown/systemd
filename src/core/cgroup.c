@@ -452,14 +452,19 @@ int unit_get_kernel_memory_low(Unit *u, uint64_t *out_kval) {
         uint64_t kval, sval;
         int r;
 
-        /* Get the *real* memory setting from the kernel, not just what we set.
-         * On cgroup v1 this is a noop and always returns 0.
+        /* Get the *real* memory setting from the kernel, not just what we set. Unsupported (and will return
+         * -ENOTSUP) on cgroup v1.
          *
          * Returns:
          *
          * <0: On error.
          *  0: If the kernel memory setting doesn't match our configuration.
          * >0: If the kernel memory setting matches our configuration.
+         *
+         * Errors we explicitly send out:
+         *
+         * - ENOTSUP: You use cgroup v1, which this function doesn't support.
+         * - EBUSY: The unit doesn't currently have a cgroup.
          */
 
         assert(u);
@@ -469,14 +474,27 @@ int unit_get_kernel_memory_low(Unit *u, uint64_t *out_kval) {
         if (r < 0)
                 return log_debug_errno(r, "Failed to determine cgroup hierarchy version: %m");
 
+        /* Unsupported on v1, just say everything is ok.
+         *
+         * We don't return ENOENT, since that could actually mask a genuine problem where somebody else has
+         * silently masked the controller.
+         */
         if (r == 0)
-                return 0;
+                return -ENOTSUP;
 
-        if (!u->cgroup_path)
-                return 0;
+        if (!u->cgroup_path || UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(u)))
+                return -EBUSY;
 
-        if (unit_has_name(u, SPECIAL_ROOT_SLICE))
-                return 0;
+        /* Even if you write a particular number of bytes into a cgroup memory file, it always returns that
+         * number rounded up to the size of the pages required for that. As such, so long as it aligns
+         * properly, everything is cricket. */
+        sval = (uint64_t)PAGE_ALIGN(c->memory_low);
+
+        /* The root slice doesn't have any controller files, so we can't compare anything. */
+        if (unit_has_name(u, SPECIAL_ROOT_SLICE)) {
+                *out_kval = sval;
+                return 1;
+        }
 
         c = unit_get_cgroup_context(u);
         assert(c);
@@ -488,11 +506,6 @@ int unit_get_kernel_memory_low(Unit *u, uint64_t *out_kval) {
         r = safe_atou64(raw_kval, &kval);
         if (r < 0)
                 return log_debug_errno(r, "Failed to parse cgroup memory value '%s', ignoring: %m", raw_kval);
-
-        /* Even if you write a particular number of bytes into a cgroup memory file, it always returns that
-         * number rounded up to the size of the pages required for that. As such, so long as it aligns
-         * properly, everything is cricket. */
-        sval = (uint64_t)PAGE_ALIGN(c->memory_low);
 
         *out_kval = kval;
 
