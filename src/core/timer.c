@@ -392,7 +392,7 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
                          * first started as the scheduled time.
                          * Also, we don't have to check t->persistent since the logic implicitly express true. */
                         if (v->next_elapse < UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].realtime)
-                                v->next_elapse = UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].realtime;
+                                v->next_elapse = now(CLOCK_REALTIME);
 
                         if (!found_realtime)
                                 t->next_elapse_realtime = v->next_elapse;
