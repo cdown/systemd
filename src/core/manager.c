@@ -3736,11 +3736,60 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
         return manager_deserialize_units(m, f, fds);
 }
 
+#define PINNED_BPF_PROGS_MAX 2048
+
+static int manager_pin_all_cgroup_bpf_programs(Manager *m, BPFProgram **pinned_progs) {
+        Unit *u;
+        int nr_pinned_progs = 0;
+
+        assert(m);
+
+        HASHMAP_FOREACH(u, m->units) {
+                BPFProgram *p;
+                size_t i;
+                BPFProgram *all_progs[] = {u->bpf_device_control_installed,
+                                           u->ip_bpf_ingress,
+                                           u->ip_bpf_ingress_installed,
+                                           u->ip_bpf_egress,
+                                           u->ip_bpf_egress_installed};
+
+                for (i = 0; i < ELEMENTSOF(all_progs); i++) {
+                        p = bpf_program_ref(all_progs[i]);
+                        if (!p)
+                                continue;
+
+                        pinned_progs[nr_pinned_progs] = p;
+
+                        if (nr_pinned_progs == PINNED_BPF_PROGS_MAX - 1) {
+                                log_error("Too many BPF programs to pin, stopping at %d.", PINNED_BPF_PROGS_MAX);
+                                goto out;
+                        }
+
+                        nr_pinned_progs++;
+                }
+        }
+
+        log_debug("Pinned %d BPF programs for daemon-reload", nr_pinned_progs);
+out:
+        return nr_pinned_progs;
+}
+
+static void unpin_all_cgroup_bpf_programs(int nr_pinned_progs, BPFProgram **pinned_progs) {
+        int i;
+
+        log_debug("Unpinning %d BPF programs after daemon-reload", nr_pinned_progs);
+
+        for (i = 0; i < nr_pinned_progs; i++)
+                (void) bpf_program_unref(pinned_progs[i]);
+}
+
 int manager_reload(Manager *m) {
         _cleanup_(manager_reloading_stopp) Manager *reloading = NULL;
         _cleanup_fdset_free_ FDSet *fds = NULL;
         _cleanup_fclose_ FILE *f = NULL;
+        BPFProgram *pinned_progs[PINNED_BPF_PROGS_MAX];
         int r;
+        size_t n_pins;
 
         assert(m);
 
@@ -3770,6 +3819,13 @@ int manager_reload(Manager *m) {
         /* Start by flushing out all jobs and units, all generated units, all runtime environments, all dynamic users
          * and everything else that is worth flushing out. We'll get it all back from the serialization — if we need
          * it.*/
+
+        /* We need existing BPF programs to survive reload, otherwise there will be a period where no BPF
+         * program is active during task execution within a cgroup. This would be bad since this may have
+         * security or reliability implications: devices we should filter won't be filtered, network activity
+         * we should filter won't be filtered, etc. We pin all the existing devices by bumping their
+         * refcount, and then storing them to later have it decremented. */
+        n_pins = manager_pin_all_cgroup_bpf_programs(m, pinned_progs);
 
         manager_clear_jobs_and_units(m);
         lookup_paths_flush_generator(&m->lookup_paths);
@@ -3810,6 +3866,9 @@ int manager_reload(Manager *m) {
 
         /* Third, fire things up! */
         manager_coldplug(m);
+
+        /* The new BPF programs should be back in action now, so we can stop pinning the old ones. */
+        unpin_all_cgroup_bpf_programs(n_pins, pinned_progs);
 
         /* Clean up runtime objects no longer referenced */
         manager_vacuum(m);
