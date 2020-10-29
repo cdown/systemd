@@ -436,6 +436,8 @@ struct Manager {
         VarlinkServer *varlink_server;
         /* Only systemd-oomd should be using this to subscribe to changes in ManagedOOM settings */
         Varlink *managed_oom_varlink_request;
+
+        Set *bpf_limbo_progs;
 };
 
 static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
@@ -476,6 +478,9 @@ int manager_add_job(Manager *m, JobType type, Unit *unit, JobMode mode, Set *aff
 int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode mode, Set *affected_jobs, sd_bus_error *e, Job **_ret);
 int manager_add_job_by_name_and_warn(Manager *m, JobType type, const char *name, JobMode mode, Set *affected_jobs,  Job **ret);
 int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error *e);
+
+int manager_pin_all_cgroup_bpf_programs(Manager *m);
+void manager_unpin_all_cgroup_bpf_programs(Manager *m);
 
 void manager_dump_units(Manager *s, FILE *f, const char *prefix);
 void manager_dump_jobs(Manager *s, FILE *f, const char *prefix);
