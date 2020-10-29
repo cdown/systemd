@@ -2316,6 +2316,13 @@ unsigned manager_dispatch_cgroup_realize_queue(Manager *m) {
                 n++;
         }
 
+        /* Release any outmoded BPF programs that were deserialized from the previous manager, since new ones
+         * should be in action now. We can't do this in manager_vacuum, because we first need to make sure
+         * all entries in the cgroup realize queue are complete, otherwise BPF firewalls/etc may not have
+         * been set up yet, and manager_dispatch_cgroup_realize_queue may in extreme circumstances take a
+         * large amount of time to complete, thus blocking things like daemon-reexec and daemon-reload. */
+        manager_unpin_all_cgroup_bpf_programs(m);
+
         return n;
 }
 

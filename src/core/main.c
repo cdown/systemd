@@ -1144,20 +1144,35 @@ static int prepare_reexecute(
         if (!fds)
                 return log_oom();
 
-        r = manager_serialize(m, f, fds, switching_root);
-        if (r < 0)
-                return r;
+        /* We need existing BPF programs to survive reload, otherwise there will be a period where no BPF
+         * program is active during task execution within a cgroup. This would be bad since this may have
+         * security or reliability implications: devices we should filter won't be filtered, network activity
+         * we should filter won't be filtered, etc. We pin all the existing devices by bumping their
+         * refcount, and then storing them to later have it decremented. */
+        (void) manager_pin_all_cgroup_bpf_programs(m);
 
-        if (fseeko(f, 0, SEEK_SET) == (off_t) -1)
+        r = manager_serialize(m, f, fds, switching_root);
+        if (r < 0) {
+                manager_unpin_all_cgroup_bpf_programs(m);
+                return r;
+        }
+
+        if (fseeko(f, 0, SEEK_SET) == (off_t) -1) {
+                manager_unpin_all_cgroup_bpf_programs(m);
                 return log_error_errno(errno, "Failed to rewind serialization fd: %m");
+        }
 
         r = fd_cloexec(fileno(f), false);
-        if (r < 0)
+        if (r < 0) {
+                manager_unpin_all_cgroup_bpf_programs(m);
                 return log_error_errno(r, "Failed to disable O_CLOEXEC for serialization: %m");
+        }
 
         r = fdset_cloexec(fds, false);
-        if (r < 0)
+        if (r < 0) {
+                manager_unpin_all_cgroup_bpf_programs(m);
                 return log_error_errno(r, "Failed to disable O_CLOEXEC for serialization fds: %m");
+        }
 
         *ret_f = TAKE_PTR(f);
         *ret_fds = TAKE_PTR(fds);
