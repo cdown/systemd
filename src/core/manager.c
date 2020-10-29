@@ -65,6 +65,7 @@
 #include "rm-rf.h"
 #include "selinux-util.h"
 #include "serialize.h"
+#include "set.h"
 #include "signal-util.h"
 #include "socket-util.h"
 #include "special.h"
@@ -3211,6 +3212,80 @@ static void manager_serialize_gid_refs(Manager *m, FILE *f) {
         manager_serialize_uid_refs_internal(m, f, &m->gid_refs, "destroy-ipc-gid");
 }
 
+static int serialize_limbo_bpf_program(FILE *f, FDSet *fds, BPFProgram *p) {
+        int copy;
+
+        /* We don't actually need the instructions or other data, since this is only used on the other side
+         * for BPF limbo, which just requires the program type, cgroup path, and kernel-facing BPF file
+         * descriptor. We don't even need to know what unit or directive it's attached to, since we're just
+         * going to expire it after coldplug. */
+
+        assert(f);
+        assert(p);
+
+        /* The program should be set up by now, otherwise it shouldn't be present at all */
+        assert(p->kernel_fd > 0);
+        assert(p->attached_path);
+
+        copy = fdset_put_dup(fds, p->kernel_fd);
+        if (copy < 0)
+                return log_error_errno(copy, "Failed to add file descriptor to serialization set: %m");
+
+        return serialize_item_format(f, "bpf-limbo", "%i %i %i \"%s\"",
+                                     copy, p->prog_type, p->attached_type, cescape(p->attached_path));
+}
+
+static void deserialize_limbo_bpf_program(Manager *m, FDSet *fds, const char *value) {
+        _cleanup_free_ char *raw_fd = NULL, *raw_pt = NULL, *raw_at = NULL, *raw_cgpath = NULL;
+        BPFProgram *p;
+        int fd, r, prog_type, attached_type;
+
+        assert(m);
+        assert(value);
+
+        r = extract_first_word(&value, &raw_fd, NULL, 0);
+        if (r <= 0 || safe_atoi(raw_fd, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd)) {
+                log_error("Failed to parse bpf-limbo FD: %s", value);
+                return;
+        }
+
+        r = extract_first_word(&value, &raw_pt, NULL, 0);
+        if (r <= 0 || safe_atoi(raw_pt, &prog_type) < 0) {
+                log_error("Failed to parse bpf-limbo program type: %s", value);
+                return;
+        }
+
+        r = extract_first_word(&value, &raw_at, NULL, 0);
+        if (r <= 0 || safe_atoi(raw_at, &attached_type) < 0) {
+                log_error("Failed to parse bpf-limbo attached type: %s", value);
+                return;
+        }
+
+        r = extract_first_word(&value, &raw_cgpath, NULL, EXTRACT_CUNESCAPE | EXTRACT_UNQUOTE);
+        if (r <= 0) {
+                log_error_errno(r, "Failed to parse attached path for BPF limbo FD %s: %m", value);
+                return;
+        }
+
+        r = bpf_program_new(prog_type, &p);
+        if (r < 0) {
+                log_error_errno(r, "Failed to create BPF limbo program");
+                return;
+        }
+
+        /* Just enough to free it when the time is right, this does not have enough information be used as a
+         * real BPFProgram. */
+        p->attached_type = attached_type;
+        p->kernel_fd = fdset_remove(fds, fd);
+        p->attached_path = strdup(raw_cgpath);
+
+        r = set_ensure_put(&m->bpf_limbo_progs, NULL, p);
+        if (r < 0) {
+                log_error_errno(r, "Failed to register BPF limbo program for FD %s", value);
+                (void) bpf_program_unref(p);
+        }
+}
+
 int manager_serialize(
                 Manager *m,
                 FILE *f,
@@ -3220,6 +3295,7 @@ int manager_serialize(
         const char *t;
         Unit *u;
         int r;
+        BPFProgram *p;
 
         assert(m);
         assert(f);
@@ -3263,6 +3339,9 @@ int manager_serialize(
 
                 (void) serialize_dual_timestamp(f, joined, m->timestamps + q);
         }
+
+        SET_FOREACH(p, m->bpf_limbo_progs)
+                (void) serialize_limbo_bpf_program(f, fds, p);
 
         if (!switching_root)
                 (void) serialize_strv(f, "env", m->client_environment);
@@ -3560,7 +3639,10 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                         else
                                 m->n_failed_jobs += n;
 
-                } else if ((val = startswith(l, "taint-usr="))) {
+                } else if ((val = startswith(l, "bpf-limbo=")))
+                        deserialize_limbo_bpf_program(m, fds, val);
+
+                else if ((val = startswith(l, "taint-usr="))) {
                         int b;
 
                         b = parse_boolean(val);
@@ -3736,6 +3818,65 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
         return manager_deserialize_units(m, f, fds);
 }
 
+int manager_pin_all_cgroup_bpf_programs(Manager *m) {
+        int r;
+        Unit *u;
+
+        assert(m);
+
+        HASHMAP_FOREACH(u, m->units) {
+                size_t i;
+                BPFProgram *p;
+                BPFProgram *builtin_progs[] = {u->bpf_device_control_installed,
+                                           u->ip_bpf_ingress,
+                                           u->ip_bpf_ingress_installed,
+                                           u->ip_bpf_egress,
+                                           u->ip_bpf_egress_installed};
+                Set *custom_progs[] = {u->ip_bpf_custom_ingress,
+                                       u->ip_bpf_custom_egress,
+                                       u->ip_bpf_custom_ingress_installed,
+                                       u->ip_bpf_custom_egress_installed};
+
+                for (i = 0; i < ELEMENTSOF(builtin_progs); i++) {
+                        p = builtin_progs[i];
+                        if (!p)
+                                continue;
+
+                        r = set_ensure_put(&m->bpf_limbo_progs, NULL, p);
+                        if (r < 0) {
+                                log_error_errno(r, "Cannot store BPF program for reload: %m");
+                                continue;
+                        }
+
+                        (void) bpf_program_ref(p);
+                }
+
+                for (i = 0; i < ELEMENTSOF(custom_progs); i++)
+                        SET_FOREACH(p, custom_progs[i]) {
+                                r = set_ensure_put(&m->bpf_limbo_progs, NULL, p);
+                                if (r < 0) {
+                                        log_error_errno(r, "Cannot store BPF program for reload: %m");
+                                        continue;
+                                }
+
+                                (void) bpf_program_ref(p);
+                        }
+        }
+
+        log_debug("Pinned %d BPF programs for serialization", set_size(m->bpf_limbo_progs));
+
+        return 0;
+}
+
+void manager_unpin_all_cgroup_bpf_programs(Manager *m) {
+        BPFProgram *p;
+
+        log_debug("Unpinning %d BPF programs for serialization", set_size(m->bpf_limbo_progs));
+
+        while ((p = set_steal_first(m->bpf_limbo_progs)))
+                (void) bpf_program_unref(p);
+}
+
 int manager_reload(Manager *m) {
         _cleanup_(manager_reloading_stopp) Manager *reloading = NULL;
         _cleanup_fdset_free_ FDSet *fds = NULL;
@@ -3754,6 +3895,13 @@ int manager_reload(Manager *m) {
 
         /* We are officially in reload mode from here on. */
         reloading = manager_reloading_start(m);
+
+        /* We need existing BPF programs to survive reload, otherwise there will be a period where no BPF
+         * program is active during task execution within a cgroup. This would be bad since this may have
+         * security or reliability implications: devices we should filter won't be filtered, network activity
+         * we should filter won't be filtered, etc. We pin all the existing devices by bumping their
+         * refcount, and then storing them to later have it decremented. */
+        (void) manager_pin_all_cgroup_bpf_programs(m);
 
         r = manager_serialize(m, f, fds, false);
         if (r < 0)
@@ -3778,6 +3926,7 @@ int manager_reload(Manager *m) {
         dynamic_user_vacuum(m, false);
         m->uid_refs = hashmap_free(m->uid_refs);
         m->gid_refs = hashmap_free(m->gid_refs);
+        m->bpf_limbo_progs = set_free(m->bpf_limbo_progs);
 
         r = lookup_paths_init(&m->lookup_paths, m->unit_file_scope, 0, NULL);
         if (r < 0)
@@ -4713,6 +4862,12 @@ static void manager_vacuum(Manager *m) {
 
         /* Release any runtimes no longer referenced */
         exec_runtime_vacuum(m);
+
+        /* Release any outmoded BPF programs, since new ones should be in action now. We also need to make
+         * sure all entries in the cgroup realize queue are complete, otherwise BPF firewalls/etc may not
+         * have been set up yet. */
+        (void) manager_dispatch_cgroup_realize_queue(m);
+        manager_unpin_all_cgroup_bpf_programs(m);
 }
 
 int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
