@@ -3737,7 +3737,7 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
         return manager_deserialize_units(m, f, fds);
 }
 
-static int manager_pin_all_cgroup_bpf_programs(Manager *m, Set *pinned_progs) {
+static int manager_pin_all_cgroup_bpf_programs(Manager *m, Set **pinned_progs) {
         int r;
         Unit *u;
 
@@ -3761,7 +3761,7 @@ static int manager_pin_all_cgroup_bpf_programs(Manager *m, Set *pinned_progs) {
                         if (!p)
                                 continue;
 
-                        r = set_ensure_put(&pinned_progs, NULL, p);
+                        r = set_ensure_put(pinned_progs, NULL, p);
                         if (r < 0)
                                 return log_error_errno(r, "Cannot store BPF program for reload: %m");
 
@@ -3770,7 +3770,7 @@ static int manager_pin_all_cgroup_bpf_programs(Manager *m, Set *pinned_progs) {
 
                 for (i = 0; i < ELEMENTSOF(custom_progs); i++) {
                         SET_FOREACH(p, custom_progs[i]) {
-                                r = set_ensure_put(&pinned_progs, NULL, p);
+                                r = set_ensure_put(pinned_progs, NULL, p);
                                 if (r < 0)
                                         return log_error_errno(r, "Cannot store BPF program for reload: %m");
 
@@ -3779,7 +3779,7 @@ static int manager_pin_all_cgroup_bpf_programs(Manager *m, Set *pinned_progs) {
                 }
         }
 
-        log_debug("Pinned %d BPF programs for daemon-reload", set_size(pinned_progs));
+        log_debug("Pinned %d BPF programs for daemon-reload", set_size(*pinned_progs));
 
         return 0;
 }
@@ -3829,12 +3829,14 @@ int manager_reload(Manager *m) {
          * and everything else that is worth flushing out. We'll get it all back from the serialization — if we need
          * it.*/
 
+        log_emergency("verynice");
+
         /* We need existing BPF programs to survive reload, otherwise there will be a period where no BPF
          * program is active during task execution within a cgroup. This would be bad since this may have
          * security or reliability implications: devices we should filter won't be filtered, network activity
          * we should filter won't be filtered, etc. We pin all the existing devices by bumping their
          * refcount, and then storing them to later have it decremented. */
-        (void) manager_pin_all_cgroup_bpf_programs(m, pinned_progs);
+        (void) manager_pin_all_cgroup_bpf_programs(m, &pinned_progs);
 
         manager_clear_jobs_and_units(m);
         lookup_paths_flush_generator(&m->lookup_paths);
