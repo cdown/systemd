@@ -716,16 +716,13 @@ void unit_free(Unit *u) {
         safe_close(u->ipv6_deny_map_fd);
 
         bpf_program_unref(u->ip_bpf_ingress);
-        bpf_program_unref(u->ip_bpf_ingress_installed);
         bpf_program_unref(u->ip_bpf_egress);
-        bpf_program_unref(u->ip_bpf_egress_installed);
 
+        /* TODO: get rid of the set, but not the programs */
         set_free(u->ip_bpf_custom_ingress);
         set_free(u->ip_bpf_custom_egress);
         set_free(u->ip_bpf_custom_ingress_installed);
         set_free(u->ip_bpf_custom_egress_installed);
-
-        bpf_program_unref(u->bpf_device_control_installed);
 
         condition_free_list(u->conditions);
         condition_free_list(u->asserts);
@@ -3591,6 +3588,13 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
         (void) serialize_bool(f, "transient", u->transient);
         (void) serialize_bool(f, "in-audit", u->in_audit);
 
+        if (u->bpf_device_control_installed)
+                (void) serialize_fd(f, fds, "bpf-device-control-fd", u->bpf_device_control_installed->kernel_fd);
+        if (u->ip_bpf_ingress_installed)
+                (void) serialize_fd(f, fds, "bpf-ingress-fd", u->ip_bpf_ingress_installed->kernel_fd);
+        if (u->ip_bpf_egress_installed)
+                (void) serialize_fd(f, fds, "bpf-egress-fd", u->ip_bpf_egress_installed->kernel_fd);
+
         (void) serialize_bool(f, "exported-invocation-id", u->exported_invocation_id);
         (void) serialize_bool(f, "exported-log-level-max", u->exported_log_level_max);
         (void) serialize_bool(f, "exported-log-extra-fields", u->exported_log_extra_fields);
@@ -3682,6 +3686,31 @@ static int unit_deserialize_job(Unit *u, FILE *f) {
         return 0;
 }
 
+static void unit_deserialize_bpf_fd(Unit *u, FDSet *fds, const char *name, const char *value, uint32_t prog_type, int attached_type) {
+        int fd, r;
+        BPFProgram *p;
+
+        if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd)) {
+                log_unit_debug(u, "Failed to parse %s value: %s", name, value);
+                return;
+        }
+
+        r = bpf_program_new(prog_type, &p);
+        if (r < 0) {
+                log_unit_debug(u, "Failed to create %s limbo BPF program", name);
+                return;
+        }
+
+        p->attached_type = attached_type;
+        p->kernel_fd = fdset_remove(fds, fd);
+
+        r = set_ensure_put(&u->bpf_limbo, NULL, p);
+        if (r < 0) {
+                log_unit_debug(u, "Failed to register %s limbo", name);
+                (void) bpf_program_unref(p);
+        }
+}
+
 int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
         int r;
 
@@ -3743,6 +3772,12 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                 } else if (streq(l, "assert-timestamp")) {
                         (void) deserialize_dual_timestamp(v, &u->assert_timestamp);
                         continue;
+                } else if (streq(l, "bpf-device-control-fd")) {
+                        unit_deserialize_bpf_fd(u, fds, l, v, BPF_PROG_TYPE_CGROUP_DEVICE, BPF_CGROUP_DEVICE);
+                } else if (streq(l, "bpf-ingress-fd")) {
+                        unit_deserialize_bpf_fd(u, fds, l, v, BPF_PROG_TYPE_CGROUP_SKB, BPF_CGROUP_INET_INGRESS);
+                } else if (streq(l, "bpf-egress-fd")) {
+                        unit_deserialize_bpf_fd(u, fds, l, v, BPF_PROG_TYPE_CGROUP_SKB, BPF_CGROUP_INET_EGRESS);
                 } else if (streq(l, "condition-result")) {
 
                         r = parse_boolean(v);

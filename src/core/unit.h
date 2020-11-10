@@ -300,6 +300,10 @@ typedef struct Unit {
         Set *ip_bpf_custom_egress;
         Set *ip_bpf_custom_egress_installed;
 
+        /* Transient storage for outmoded BPF programs during daemon-reload and daemon-reexec, until the
+         * new BPF programs come online during coldplug. This is then emptied. */
+        Set *bpf_limbo;
+
         uint64_t ip_accounting_extra[_CGROUP_IP_ACCOUNTING_METRIC_MAX];
 
         /* Low-priority event source which is used to remove watched PIDs that have gone away, and subscribe to any new

@@ -4702,6 +4702,9 @@ static void manager_vacuum_gid_refs(Manager *m) {
 }
 
 static void manager_vacuum(Manager *m) {
+        Unit *u;
+        char *k;
+
         assert(m);
 
         /* Release any dynamic users no longer referenced */
@@ -4713,6 +4716,13 @@ static void manager_vacuum(Manager *m) {
 
         /* Release any runtimes no longer referenced */
         exec_runtime_vacuum(m);
+
+        /* Release any outmoded BPF programs */
+        HASHMAP_FOREACH_KEY(u, k, m->units) {
+                BPFProgram *p;
+                while ((p = set_steal_first(u->bpf_limbo)))
+                        (void) bpf_program_unref(p);
+        }
 }
 
 int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
