@@ -4720,8 +4720,11 @@ static void manager_vacuum(Manager *m) {
         /* Release any outmoded BPF programs */
         HASHMAP_FOREACH_KEY(u, k, m->units) {
                 BPFProgram *p;
-                while ((p = set_steal_first(u->bpf_limbo)))
+                log_emergency("%d BPF programs to destroy", set_size(u->bpf_limbo));
+                while ((p = set_steal_first(u->bpf_limbo))) {
+                        log_emergency("Releasing a BPF program");
                         (void) bpf_program_unref(p);
+                }
         }
 }
 

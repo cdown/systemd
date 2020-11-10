@@ -3588,12 +3588,18 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
         (void) serialize_bool(f, "transient", u->transient);
         (void) serialize_bool(f, "in-audit", u->in_audit);
 
-        if (u->bpf_device_control_installed)
+        if (u->bpf_device_control_installed) {
+                log_emergency("Serialised at %d", __LINE__);
                 (void) serialize_fd(f, fds, "bpf-device-control-fd", u->bpf_device_control_installed->kernel_fd);
-        if (u->ip_bpf_ingress_installed)
+        }
+        if (u->ip_bpf_ingress_installed) {
+                log_emergency("Serialised at %d", __LINE__);
                 (void) serialize_fd(f, fds, "bpf-ingress-fd", u->ip_bpf_ingress_installed->kernel_fd);
-        if (u->ip_bpf_egress_installed)
+        }
+        if (u->ip_bpf_egress_installed) {
+                log_emergency("Serialised at %d", __LINE__);
                 (void) serialize_fd(f, fds, "bpf-egress-fd", u->ip_bpf_egress_installed->kernel_fd);
+        }
 
         (void) serialize_bool(f, "exported-invocation-id", u->exported_invocation_id);
         (void) serialize_bool(f, "exported-log-level-max", u->exported_log_level_max);
@@ -3774,10 +3780,16 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                         continue;
                 } else if (streq(l, "bpf-device-control-fd")) {
                         unit_deserialize_bpf_fd(u, fds, l, v, BPF_PROG_TYPE_CGROUP_DEVICE, BPF_CGROUP_DEVICE);
+                        log_emergency("Deseralised at %d", __LINE__);
+                        continue;
                 } else if (streq(l, "bpf-ingress-fd")) {
                         unit_deserialize_bpf_fd(u, fds, l, v, BPF_PROG_TYPE_CGROUP_SKB, BPF_CGROUP_INET_INGRESS);
+                        log_emergency("Deseralised at %d", __LINE__);
+                        continue;
                 } else if (streq(l, "bpf-egress-fd")) {
                         unit_deserialize_bpf_fd(u, fds, l, v, BPF_PROG_TYPE_CGROUP_SKB, BPF_CGROUP_INET_EGRESS);
+                        log_emergency("Deseralised at %d", __LINE__);
+                        continue;
                 } else if (streq(l, "condition-result")) {
 
                         r = parse_boolean(v);
