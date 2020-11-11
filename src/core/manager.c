@@ -3244,50 +3244,60 @@ static void deserialize_limbo_bpf_program(Manager *m, FDSet *fds, const char *va
         BPFProgram *p;
         int fd, r, prog_type, attached_type;
 
+
         assert(m);
         assert(value);
 
+        log_error("YEET: deserialize limbo: %d", __LINE__)
         r = extract_first_word(&value, &raw_fd, NULL, 0);
         if (r <= 0 || safe_atoi(raw_fd, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd)) {
                 log_error("Failed to parse bpf-limbo FD: %s", value);
                 return;
         }
+        log_error("YEET: deserialize limbo: %d", __LINE__)
 
         r = extract_first_word(&value, &raw_pt, NULL, 0);
         if (r <= 0 || safe_atoi(raw_pt, &prog_type) < 0) {
                 log_error("Failed to parse bpf-limbo program type: %s", value);
                 return;
         }
+        log_error("YEET: deserialize limbo: %d", __LINE__)
 
         r = extract_first_word(&value, &raw_at, NULL, 0);
         if (r <= 0 || safe_atoi(raw_at, &attached_type) < 0) {
                 log_error("Failed to parse bpf-limbo attached type: %s", value);
                 return;
         }
+        log_error("YEET: deserialize limbo: %d", __LINE__)
 
         r = extract_first_word(&value, &raw_cgpath, NULL, EXTRACT_CUNESCAPE | EXTRACT_UNQUOTE);
         if (r <= 0) {
                 log_error_errno(r, "Failed to parse attached path for BPF limbo FD %s: %m", value);
                 return;
         }
+        log_error("YEET: deserialize limbo: %d", __LINE__)
 
         r = bpf_program_new(prog_type, &p);
         if (r < 0) {
                 log_error_errno(r, "Failed to create BPF limbo program");
                 return;
         }
+        log_error("YEET: deserialize limbo: %d", __LINE__)
 
         /* Just enough to free it when the time is right, this does not have enough information be used as a
          * real BPFProgram. */
         p->attached_type = attached_type;
         p->kernel_fd = fdset_remove(fds, fd);
         p->attached_path = strdup(raw_cgpath);
+        log_error("YEET: deserialize limbo: %d", __LINE__)
 
         r = set_ensure_put(&m->bpf_limbo_progs, NULL, p);
         if (r < 0) {
                 log_error_errno(r, "Failed to register BPF limbo program for FD %s", value);
                 (void) bpf_program_unref(p);
         }
+
+        log_error("YEET: deserialize limbo, success!")
 }
 
 int manager_serialize(
