@@ -3839,7 +3839,7 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
         return manager_deserialize_units(m, f, fds);
 }
 
-static int manager_pin_all_cgroup_bpf_programs(Manager *m) {
+int manager_pin_all_cgroup_bpf_programs(Manager *m) {
         int r;
         Unit *u;
 
@@ -3903,7 +3903,7 @@ static void manager_skeletonize_all_cgroup_bpf_programs(Manager *m) {
                 bpf_program_skeletonize(p);
 }
 
-static void unpin_all_cgroup_bpf_programs(Manager *m) {
+void unpin_all_cgroup_bpf_programs(Manager *m) {
         BPFProgram *p;
 
         log_error("YEET: unpin_all_cgroup_bpf_programs");

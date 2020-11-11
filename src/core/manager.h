@@ -479,6 +479,9 @@ int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode 
 int manager_add_job_by_name_and_warn(Manager *m, JobType type, const char *name, JobMode mode, Set *affected_jobs,  Job **ret);
 int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error *e);
 
+int manager_pin_all_cgroup_bpf_programs(Manager *m);
+void unpin_all_cgroup_bpf_programs(Manager *m);
+
 void manager_dump_units(Manager *s, FILE *f, const char *prefix);
 void manager_dump_jobs(Manager *s, FILE *f, const char *prefix);
 void manager_dump(Manager *s, FILE *f, const char *prefix);
