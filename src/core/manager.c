@@ -4723,6 +4723,9 @@ static void manager_vacuum(Manager *m) {
                 log_emergency("%d BPF programs to destroy", set_size(u->bpf_limbo));
                 while ((p = set_steal_first(u->bpf_limbo))) {
                         log_emergency("Releasing a BPF program");
+                        /* We should only have one reference, created during daemon deserialisation. Anything
+                         * else is a bug that would prevent us from freeing the BPF program. */
+                        assert(p->n_ref == 1);
                         (void) bpf_program_unref(p);
                 }
         }
