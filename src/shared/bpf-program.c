@@ -195,15 +195,21 @@ int bpf_program_cgroup_detach(BPFProgram *p) {
         } else {
                 union bpf_attr attr;
 
+                log_emergency("Freeing one BPF program");
+
                 attr = (union bpf_attr) {
                         .attach_type = p->attached_type,
                         .target_fd = fd,
                         .attach_bpf_fd = p->kernel_fd,
                 };
 
-                if (bpf(BPF_PROG_DETACH, &attr, sizeof(attr)) < 0)
+                if (bpf(BPF_PROG_DETACH, &attr, sizeof(attr)) < 0) {
+                        log_emergency_errno(errno, "Freeing one BPF program failed: %m");
                         return -errno;
+                }
         }
+
+        log_emergency("Freeing BPF program succeeded!");
 
         p->attached_path = mfree(p->attached_path);
 
