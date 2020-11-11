@@ -3234,6 +3234,8 @@ static int serialize_limbo_bpf_program(FILE *f, FDSet *fds, BPFProgram *p) {
         if (copy < 0)
                 return log_error_errno(copy, "Failed to add file descriptor to serialization set: %m");
 
+        log_error("YEET: successful bpf program limbo serialize");
+
         return serialize_item_format(f, "bpf-limbo", "%i %i %i \"%s\"", copy, p->prog_type, p->attached_type, p->attached_path);
 }
 
@@ -3346,6 +3348,8 @@ int manager_serialize(
 
         SET_FOREACH(p, m->bpf_limbo_progs)
                 (void) serialize_limbo_bpf_program(f, fds, p);
+
+        log_error("YEET: set_size(m->bpf_limbo_progs): %d", set_size(m->bpf_limbo_progs));
 
         if (!switching_root)
                 (void) serialize_strv(f, "env", m->client_environment);
