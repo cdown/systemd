@@ -4720,12 +4720,27 @@ static void manager_vacuum(Manager *m) {
         /* Release any outmoded BPF programs */
         HASHMAP_FOREACH_KEY(u, k, m->units) {
                 BPFProgram *p;
+
+                assert(set_isempty(u->bpf_limbo) || u->cgroup_path);
+
                 log_emergency("%d BPF programs to destroy", set_size(u->bpf_limbo));
                 while ((p = set_steal_first(u->bpf_limbo))) {
+                        int r;
+
                         log_emergency("Releasing a BPF program");
                         /* We should only have one reference, created during daemon deserialisation. Anything
                          * else is a bug that would prevent us from freeing the BPF program. */
                         assert(p->n_ref == 1);
+
+                        /* Programs in BPF limbo don't have any attached path after deserialisation, since we
+                         * might not have had the cgroup path available yet. */
+                        assert(!p->attached_path);
+                        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, NULL, &p->attached_path);
+                        if (r < 0) {
+                                log_error_errno(r, "Leaking BPF program, cannot get cgroup path: %m");
+                                continue;
+                        }
+
                         (void) bpf_program_unref(p);
                 }
         }
