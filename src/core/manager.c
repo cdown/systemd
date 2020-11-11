@@ -3909,10 +3909,8 @@ void unpin_all_cgroup_bpf_programs(Manager *m) {
         log_error("YEET: unpin_all_cgroup_bpf_programs");
         log_debug("Unpinning %d BPF programs after daemon-reload", set_size(m->bpf_limbo_progs));
 
-        SET_FOREACH(p, m->bpf_limbo_progs)
+        while ((p = set_steal_first(m->bpf_limbo_progs)))
                 (void) bpf_program_unref(p);
-
-        set_free(m->bpf_limbo_progs);
 }
 
 int manager_reload(Manager *m) {
