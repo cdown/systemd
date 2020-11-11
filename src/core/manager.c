@@ -1630,6 +1630,7 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
         int r;
 
         assert(m);
+        log_emergency("YEET: manager_startup");
 
         /* If we are running in test mode, we still want to run the generators,
          * but we should not touch the real generator directories. */
@@ -1667,6 +1668,7 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
                 dual_timestamp_get(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_UNITS_LOAD_FINISH));
 
                 /* Second, deserialize if there is something to deserialize */
+                log_emergency("YEET: serialization %d", !!serialization);
                 if (serialization) {
                         r = manager_deserialize(m, serialization, fds);
                         if (r < 0)

@@ -69,6 +69,7 @@
 #if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
+#include "set.h"
 #include "selinux-setup.h"
 #include "selinux-util.h"
 #include "signal-util.h"
@@ -2831,11 +2832,15 @@ int main(int argc, char *argv[]) {
 
         before_startup = now(CLOCK_MONOTONIC);
 
+        log_emergency("YEET: before manager_startup");
+
         r = manager_startup(m, arg_serialization, fds);
         if (r < 0) {
                 error_message = "Failed to start up manager";
                 goto finish;
         }
+
+        log_emergency("YEET: after manager_startup, arg_serialization: %d, set_size(m->bpf_limbo_progs): %d", !!arg_serialization, set_size(m->bpf_limbo_progs));
 
         /* This will close all file descriptors that were opened, but not claimed by any unit. */
         fds = fdset_free(fds);
