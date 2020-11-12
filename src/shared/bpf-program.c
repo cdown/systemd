@@ -198,8 +198,11 @@ int bpf_program_cgroup_detach(BPFProgram *p) {
         if (!p->attached_path)
                 return -EUNATCH;
 
+        log_error("YEET: Freeing BPF program at %s: %d", p->attached_path, __LINE__);
+
         fd = open(p->attached_path, O_DIRECTORY|O_RDONLY|O_CLOEXEC);
         if (fd < 0) {
+                log_error("YEET: Freeing BPF program at %s: %d", p->attached_path, __LINE__);
                 if (errno != ENOENT)
                         return -errno;
 
@@ -207,6 +210,7 @@ int bpf_program_cgroup_detach(BPFProgram *p) {
                  * implicitly by the removal, hence don't complain */
 
         } else {
+                log_error("YEET: Freeing BPF program at %s: %d", p->attached_path, __LINE__);
                 union bpf_attr attr;
 
                 attr = (union bpf_attr) {
@@ -218,6 +222,7 @@ int bpf_program_cgroup_detach(BPFProgram *p) {
                 if (bpf(BPF_PROG_DETACH, &attr, sizeof(attr)) < 0)
                         return -errno;
         }
+        log_error("YEET: Freeing BPF program at %s: %d", p->attached_path, __LINE__);
 
         p->attached_path = mfree(p->attached_path);
 
