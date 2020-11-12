@@ -3868,6 +3868,13 @@ int manager_pin_all_cgroup_bpf_programs(Manager *m) {
         return 0;
 }
 
+static void manager_skeletonize_all_cgroup_bpf_programs(Manager *m) {
+        BPFProgram *p;
+
+        SET_FOREACH(p, m->bpf_limbo_progs)
+                bpf_program_skeletonize(p);
+}
+
 void manager_unpin_all_cgroup_bpf_programs(Manager *m) {
         BPFProgram *p;
 
@@ -3936,6 +3943,11 @@ int manager_reload(Manager *m) {
         (void) manager_run_generators(m);
 
         lookup_paths_log(&m->lookup_paths);
+
+        /* The only canonical reference left to the dynamically allocated parts of these BPF programs is
+         * going to be on the other side of manager_deserialize, so the freeable parts can now be freed. The
+         * program itself will be detached as part of manager_vacuum. */
+        manager_skeletonize_all_cgroup_bpf_programs(m);
 
         /* We flushed out generated files, for which we don't watch mtime, so we should flush the old map. */
         manager_free_unit_name_maps(m);
