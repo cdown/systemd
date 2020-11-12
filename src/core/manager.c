@@ -4901,6 +4901,8 @@ static void manager_vacuum(Manager *m) {
         /* Release any runtimes no longer referenced */
         exec_runtime_vacuum(m);
 
+        log_emergency("YEET: before unpin, set_size(m->bpf_limbo_progs): %d", set_size(m->bpf_limbo_progs));
+
         /* Release any outmoded BPF programs, since new ones should be in action now */
         unpin_all_cgroup_bpf_programs(m);
 }

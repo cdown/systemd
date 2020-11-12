@@ -2855,8 +2855,6 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        log_emergency("YEET: after manager_startup, arg_serialization: %d, set_size(m->bpf_limbo_progs): %d", !!arg_serialization, set_size(m->bpf_limbo_progs));
-
         /* This will close all file descriptors that were opened, but not claimed by any unit. */
         fds = fdset_free(fds);
         arg_serialization = safe_fclose(arg_serialization);
