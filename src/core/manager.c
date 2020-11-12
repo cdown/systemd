@@ -3998,9 +3998,6 @@ int manager_reload(Manager *m) {
         /* Third, fire things up! */
         manager_coldplug(m);
 
-        /* The new BPF programs should be back in action now, so we can stop pinning the old ones. */
-        unpin_all_cgroup_bpf_programs(m);
-
         /* Clean up runtime objects no longer referenced */
         manager_vacuum(m);
 
@@ -4903,6 +4900,9 @@ static void manager_vacuum(Manager *m) {
 
         /* Release any runtimes no longer referenced */
         exec_runtime_vacuum(m);
+
+        /* Release any outmoded BPF programs, since new ones should be in action now */
+        unpin_all_cgroup_bpf_programs(m);
 }
 
 int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
