@@ -3214,6 +3214,7 @@ static void manager_serialize_gid_refs(Manager *m, FILE *f) {
 
 static int serialize_limbo_bpf_program(FILE *f, FDSet *fds, BPFProgram *p) {
         int copy;
+        _cleanup_free_ char *ap = NULL;
 
         /* We don't actually need the instructions or other data, since this is only used on the other side
          * for BPF limbo, which just requires the program type, cgroup path, and kernel-facing BPF file
@@ -3233,12 +3234,16 @@ static int serialize_limbo_bpf_program(FILE *f, FDSet *fds, BPFProgram *p) {
         if (copy < 0)
                 return log_error_errno(copy, "Failed to add file descriptor to serialization set: %m");
 
+        ap = cescape(p->attached_path);
+        if (!ap)
+                return log_oom();
+
         return serialize_item_format(f, "bpf-limbo", "%i %i %i \"%s\"",
-                                     copy, p->prog_type, p->attached_type, cescape(p->attached_path));
+                                     copy, p->prog_type, p->attached_type, ap);
 }
 
 static void deserialize_limbo_bpf_program(Manager *m, FDSet *fds, const char *value) {
-        _cleanup_free_ char *raw_fd = NULL, *raw_pt = NULL, *raw_at = NULL, *raw_cgpath = NULL;
+        _cleanup_free_ char *raw_fd = NULL, *raw_pt = NULL, *raw_at = NULL, *cgpath = NULL;
         BPFProgram *p;
         int fd, r, prog_type, attached_type;
 
@@ -3263,7 +3268,7 @@ static void deserialize_limbo_bpf_program(Manager *m, FDSet *fds, const char *va
                 return;
         }
 
-        r = extract_first_word(&value, &raw_cgpath, NULL, EXTRACT_CUNESCAPE | EXTRACT_UNQUOTE);
+        r = extract_first_word(&value, &cgpath, NULL, EXTRACT_CUNESCAPE | EXTRACT_UNQUOTE);
         if (r <= 0) {
                 log_error("Failed to parse attached path for BPF limbo FD %s", value);
                 return;
@@ -3279,7 +3284,7 @@ static void deserialize_limbo_bpf_program(Manager *m, FDSet *fds, const char *va
          * real BPFProgram. */
         p->attached_type = attached_type;
         p->kernel_fd = fdset_remove(fds, fd);
-        p->attached_path = strdup(raw_cgpath);
+        p->attached_path = TAKE_PTR(cgpath);
 
         r = set_ensure_put(&m->bpf_limbo_progs, NULL, p);
         if (r < 0) {
