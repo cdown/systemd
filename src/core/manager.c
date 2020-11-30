@@ -3230,9 +3230,12 @@ static int serialize_limbo_bpf_program(FILE *f, FDSet *fds, BPFProgram *p) {
         if (p->kernel_fd < 0 || !p->attached_path)
                 return -ENOTCONN;
 
-        copy = fdset_put(fds, p->kernel_fd);
+        copy = fdset_put_dup(fds, p->kernel_fd);
         if (copy < 0)
                 return log_error_errno(copy, "Failed to add file descriptor to serialization set: %m");
+
+        /* Otherwise, on daemon-reload, we'd remain pinned. */
+        safe_close(p->kernel_fd);
 
         ap = cescape(p->attached_path);
         if (!ap)
