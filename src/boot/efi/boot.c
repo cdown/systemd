@@ -2063,6 +2063,37 @@ static void config_entry_add_windows(Config *config, EFI_HANDLE *device, EFI_FIL
 #endif
 }
 
+static void config_entry_add_windows_veracrypt(Config *config, EFI_HANDLE *device, EFI_FILE *root_dir) {
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
+        _cleanup_freepool_ CHAR8 *bcd = NULL;
+        _cleanup_freepool_ CHAR16 *title = NULL;
+        const CHAR16 *base_title = NULL;
+        const CHAR16 *vc_suffix = L" (VeraCrypt)";
+        EFI_STATUS err;
+        UINTN len;
+
+        assert(config);
+        assert(device);
+        assert(root_dir);
+
+        if (!config->auto_entries)
+                return;
+
+        /* VeraCrypt only supports one bootable system encryption per EFI instance, and only on Windows, so
+         * if we find a single BCD entry, that's got to be the one we're looking for. */
+        err = file_read(root_dir, L"\\EFI\\Microsoft\\Boot\\BCD", 0, 100*1024, &bcd, &len);
+        if (!EFI_ERROR(err))
+                base_title = get_bcd_title((UINT8 *) bcd, len) ?: L"Windows";
+
+        len = StrLen(base_title) + StrLen(vc_suffix) + 1;
+        title = xnew(CHAR16, len);
+        SPrint(title, len, L"%s%s", base_title, vc_suffix);
+
+        config_entry_add_loader_auto(config, device, root_dir, NULL, L"auto-windows-veracrypt", 'w', title,
+                                     L"\\EFI\\VeraCrypt\\DcsBoot.efi");
+#endif
+}
+
 static void config_entry_add_linux(
                 Config *config,
                 EFI_HANDLE *device,
@@ -2429,6 +2460,7 @@ static void config_load_all_entries(
         /* Add these now, so they get sorted with the rest. */
         config_entry_add_osx(config);
         config_entry_add_windows(config, loaded_image->DeviceHandle, root_dir);
+        config_entry_add_windows_veracrypt(config, loaded_image->DeviceHandle, root_dir);
 
         /* sort entries after version number */
         sort_pointer_array((void **) config->entries, config->entry_count, (compare_pointer_func_t) config_entry_compare);

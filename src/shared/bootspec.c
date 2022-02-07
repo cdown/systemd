@@ -765,6 +765,7 @@ int boot_entries_augment_from_loader(
                 /* Pretty names for a few well-known automatically discovered entries. */
                 "auto-osx",                      "macOS",
                 "auto-windows",                  "Windows Boot Manager",
+                "auto-windows-veracrypt",        "Windows (VeraCrypt)",
                 "auto-efi-shell",                "EFI Shell",
                 "auto-efi-default",              "EFI Default Loader",
                 "auto-reboot-to-firmware-setup", "Reboot Into Firmware Interface",

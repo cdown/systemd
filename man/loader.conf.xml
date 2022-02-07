@@ -96,6 +96,10 @@
                 <entry>auto-windows</entry>
                 <entry>Windows Boot Manager</entry>
               </row>
+              <row>
+                <entry>auto-windows-veracrypt</entry>
+                <entry>Windows (VeraCrypt)</entry>
+              </row>
             </tbody>
           </tgroup>
         </table></listitem>
