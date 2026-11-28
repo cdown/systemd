@@ -1548,6 +1548,10 @@ bool job_may_gc(Job *j) {
         if (sd_bus_track_count(j->bus_track) > 0 || !strv_isempty(j->deserialized_clients))
                 return false;
 
+        /* A varlink client streaming this job is waiting for its final reply. */
+        if (j->varlink)
+                return false;
+
         /* FIXME: So this is a bit ugly: for now we don't properly track references made via private bus connections
          * (because it's nasty, as sd_bus_track doesn't apply to it). We simply remember that the job was once
          * referenced by one, and reset this whenever we notice that no private bus connections are around. This means

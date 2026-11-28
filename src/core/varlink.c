@@ -393,6 +393,9 @@ static void vl_disconnect(sd_varlink_server *s, sd_varlink *link, void *userdata
         HASHMAP_FOREACH(j, m->jobs)
                 if (j->varlink == link) {
                         j->varlink = sd_varlink_unref(j->varlink);
+
+                        /* The streaming client went away, maybe we should GC the job now? */
+                        job_add_to_gc_queue(j);
                         break;
                 }
 
